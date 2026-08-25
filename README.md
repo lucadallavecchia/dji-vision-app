@@ -1,0 +1,74 @@
+# DJI Vision
+
+App desktop (Mac/Windows) che riceve lo streaming RTMP da DJI Fly (drone DJI Mini 3 Pro),
+esegue detection di persone/animali (YOLO) e mostra il video con i bounding box, accessibile
+anche da altri dispositivi (iOS, Android, altri computer) via browser sulla stessa rete.
+
+## Setup
+
+1. Crea un virtualenv e installa le dipendenze:
+
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate   # su Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+
+2. Scarica il binario di [MediaMTX](https://github.com/bluenviron/mediamtx/releases) per il
+   tuo sistema operativo (non è incluso nel repo, va scaricato manualmente — vedi `.gitignore`).
+
+   **Mac (Apple Silicon)**, dalla root del progetto:
+
+   ```bash
+   curl -L -o mediamtx.tar.gz \
+     https://github.com/bluenviron/mediamtx/releases/latest/download/mediamtx_v1.20.1_darwin_arm64.tar.gz
+   tar -xzf mediamtx.tar.gz mediamtx -C mediamtx/
+   chmod +x mediamtx/mediamtx
+   rm mediamtx.tar.gz
+   ```
+
+   Su Mac, al primo avvio Gatekeeper potrebbe bloccare il binario ("Apple could not
+   verify..."); in tal caso rimuovi l'attributo di quarantena:
+
+   ```bash
+   xattr -d com.apple.quarantine mediamtx/mediamtx
+   ```
+
+   **Mac (Intel)**: usa l'asset `mediamtx_v1.20.1_darwin_amd64.tar.gz` nello stesso modo.
+
+   **Windows**: scarica l'asset `mediamtx_v1.20.1_windows_amd64.zip` dalla pagina
+   [releases](https://github.com/bluenviron/mediamtx/releases), estrai `mediamtx.exe` e
+   mettilo in `mediamtx/mediamtx.exe`.
+
+   > Verifica sempre l'ultima versione disponibile nella pagina releases: i comandi sopra
+   > puntano alla v1.20.1, che potrebbe non essere più la più recente.
+
+3. Avvia l'app:
+
+   ```bash
+   python main.py
+   ```
+
+   Al primo avvio il modello YOLO (`yolo11n.pt`) viene scaricato automaticamente
+   (serve connessione internet).
+
+4. Nel terminale vedrai l'URL RTMP da configurare in DJI Fly, es:
+
+   ```
+   DJI Fly deve pubblicare su: rtmp://192.168.1.23:1935/drone
+   Altri dispositivi possono guardare su: http://192.168.1.23:8000
+   ```
+
+   Su DJI Fly (smartphone/tablet collegato al drone), attiva lo streaming live
+   RTMP personalizzato e inserisci quell'URL.
+
+5. Si apre una finestra desktop con il video annotato. Per guardarlo da un altro
+   dispositivo (telefono, tablet, altro PC) sulla stessa rete Wi-Fi, apri
+   `http://<ip-stampato>:8000` nel browser.
+
+## Note
+
+- Tutti i dispositivi (host + spettatori) devono essere sulla stessa rete locale.
+- Le classi rilevate di default sono: persona, cane, gatto, uccello, cavallo,
+  pecora, mucca (modificabile in `detection.py`, `TARGET_CLASSES`).
+- Per ridurre il carico CPU puoi processare 1 frame ogni N in `detection.py`.

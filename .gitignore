@@ -1,0 +1,25 @@
+# Virtual environment
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# MediaMTX binario (specifico per piattaforma, va scaricato — vedi README.md)
+mediamtx/mediamtx
+mediamtx/mediamtx.exe
+mediamtx/mediamtx_*/
+
+# Certificati TLS auto-generati da MediaMTX al primo avvio
+mediamtx/auto.crt
+mediamtx/auto.key
+
+# Modello YOLO scaricato automaticamente al primo avvio
+*.pt
+
+# PyCharm
+.idea/
+
+# macOS
+.DS_Store

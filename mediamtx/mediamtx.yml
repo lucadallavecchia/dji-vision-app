@@ -1,0 +1,15 @@
+logLevel: info
+
+rtmp: yes
+rtmpAddress: :1935
+
+rtsp: yes
+rtspAddress: :8554
+protocols: [tcp]
+
+hls: no
+webrtc: no
+
+# DJI Fly deve pubblicare su rtmp://<ip-di-questo-pc>:1935/drone
+paths:
+  drone:
