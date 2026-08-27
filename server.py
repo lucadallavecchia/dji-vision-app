@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from detection import VideoProcessor
 from utils import get_lan_ip
@@ -32,6 +33,24 @@ def index():
 @app.get("/info")
 def info():
     return {"rtmp_url": f"rtmp://{get_lan_ip()}:1935/drone"}
+
+
+class ClassesPayload(BaseModel):
+    classes: list[str]
+
+
+@app.get("/classes")
+def get_classes():
+    return {
+        "available": processor.get_available_classes(),
+        "selected": processor.get_target_classes(),
+    }
+
+
+@app.post("/classes")
+def set_classes(payload: ClassesPayload):
+    processor.set_target_classes(payload.classes)
+    return {"selected": processor.get_target_classes()}
 
 
 def mjpeg_generator():

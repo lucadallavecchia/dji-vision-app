@@ -5,7 +5,7 @@ import cv2
 from ultralytics import YOLO
 
 RTSP_URL = "rtsp://127.0.0.1:8554/drone"
-TARGET_CLASSES = {"person", "dog", "cat", "bird", "horse", "sheep", "cow"}
+DEFAULT_TARGET_CLASSES = {"person", "dog", "cat", "bird", "horse", "sheep", "cow"}
 MODEL_NAME = "yolo11n.pt"
 
 
@@ -13,12 +13,29 @@ class VideoProcessor:
     def __init__(self):
         self.model = YOLO(MODEL_NAME)
         self.class_names = self.model.names
-        self.target_ids = [i for i, n in self.class_names.items() if n in TARGET_CLASSES]
 
         self._lock = threading.Lock()
         self._latest_jpeg = None
         self._running = False
         self._thread = None
+
+        self._config_lock = threading.Lock()
+        self.target_ids = [i for i, n in self.class_names.items() if n in DEFAULT_TARGET_CLASSES]
+
+    def get_available_classes(self):
+        """Tutte le classi riconosciute dal modello, in ordine alfabetico."""
+        return sorted(self.class_names.values())
+
+    def get_target_classes(self):
+        with self._config_lock:
+            ids = list(self.target_ids)
+        return sorted(self.class_names[i] for i in ids)
+
+    def set_target_classes(self, names):
+        valid = set(self.class_names.values())
+        ids = [i for i, n in self.class_names.items() if n in names and n in valid]
+        with self._config_lock:
+            self.target_ids = ids
 
     def start(self):
         self._running = True
@@ -46,7 +63,10 @@ class VideoProcessor:
                 time.sleep(0.5)
                 continue
 
-            results = self.model.predict(frame, classes=self.target_ids, verbose=False)[0]
+            with self._config_lock:
+                target_ids = list(self.target_ids)
+
+            results = self.model.predict(frame, classes=target_ids, verbose=False)[0]
             for box in results.boxes:
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 cls_id = int(box.cls[0])
