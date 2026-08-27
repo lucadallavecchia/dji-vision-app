@@ -29,6 +29,7 @@
     font-size: 0.85rem;
   }
   .stream-wrap {
+    position: relative;
     width: 100%;
     max-width: 1000px;
     padding: 0 8px 16px;
@@ -40,6 +41,18 @@
     display: block;
     background: #000;
   }
+  #fps-overlay {
+    position: absolute;
+    top: 8px;
+    left: 16px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #7ac47a;
+    font-family: ui-monospace, monospace;
+    font-size: 0.8rem;
+    padding: 3px 8px;
+    border-radius: 6px;
+  }
+  .hidden { display: none; }
 
   /* Pulsante per aprire/chiudere il menu classi */
   #menu-toggle {
@@ -97,9 +110,20 @@
   body.menu-open #class-menu {
     transform: translateX(0);
   }
-  #class-menu h2 {
-    margin: 0 0 4px;
+  #class-menu details {
+    border-bottom: 1px solid #2a2a2a;
+    padding: 10px 0;
+  }
+  #class-menu details:last-of-type {
+    border-bottom: none;
+  }
+  #class-menu summary {
     font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #class-menu details[open] summary {
+    margin-bottom: 8px;
   }
   #class-menu .hint {
     margin: 0 0 12px;
@@ -120,6 +144,69 @@
     padding: 6px 8px;
     font-size: 0.75rem;
     cursor: pointer;
+  }
+  .menu-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 4px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #2a2a2a;
+  }
+  .menu-toggle-row .hint {
+    margin: 2px 0 0;
+  }
+  .field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 4px;
+    font-size: 0.85rem;
+  }
+  .field-row input[type="number"] {
+    width: 70px;
+    background: #262626;
+    color: #eee;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 4px 6px;
+  }
+  .device-options {
+    display: flex;
+    gap: 20px;
+    padding: 6px 4px;
+  }
+  .device-options label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  #device-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: #999;
+    padding: 4px;
+  }
+  #device-status.hidden {
+    display: none;
+  }
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid #444;
+    border-top-color: #7ac47a;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
   #class-list label {
     display: flex;
@@ -147,18 +234,65 @@
   </header>
   <div class="stream-wrap">
     <img id="stream" src="/stream" alt="Live stream">
+    <div id="fps-overlay">-- FPS</div>
   </div>
 
   <button id="menu-toggle" aria-label="Impostazioni rilevamento" title="Classi da rilevare">☰</button>
   <div id="menu-overlay"></div>
   <aside id="class-menu">
-    <h2>Classi da rilevare</h2>
-    <p class="hint">Modifica visibile a tutti gli spettatori connessi.</p>
-    <div class="actions">
-      <button id="select-all">Tutte</button>
-      <button id="select-none">Nessuna</button>
-    </div>
-    <div id="class-list">Caricamento...</div>
+    <details open>
+      <summary>Classi da rilevare</summary>
+      <p class="hint">Modifica visibile a tutti gli spettatori connessi.</p>
+      <div class="actions">
+        <button id="select-all">Tutte</button>
+        <button id="select-none">Nessuna</button>
+      </div>
+      <div id="class-list">Caricamento...</div>
+    </details>
+
+    <details>
+      <summary>Visualizzazione</summary>
+      <label class="menu-toggle-row">
+        <span>Mostra FPS</span>
+        <input type="checkbox" id="fps-checkbox">
+      </label>
+    </details>
+
+    <details>
+      <summary>Modello di rilevamento</summary>
+      <p class="hint">Modifica visibile a tutti gli spettatori connessi.</p>
+      <div class="device-options">
+        <label><input type="radio" name="device" id="device-cpu" value="cpu"> CPU</label>
+        <label><input type="radio" name="device" id="device-gpu" value="gpu"> GPU (Metal)</label>
+      </div>
+      <p class="hint hidden" id="device-unavailable-hint">GPU non disponibile su questo dispositivo.</p>
+      <div id="device-status" class="hidden">
+        <span class="spinner"></span>Ricaricamento modello...
+      </div>
+      <label class="menu-toggle-row">
+        <span>
+          SAHI (tile per oggetti piccoli)<br>
+          <span class="hint">Più preciso su riprese aeree, più lento.</span>
+        </span>
+        <input type="checkbox" id="sahi-checkbox">
+      </label>
+      <label class="field-row">
+        <span>Dimensione tile (px)</span>
+        <input type="number" id="sahi-slice-size" min="128" max="1536" step="32">
+      </label>
+      <label class="field-row">
+        <span>Overlap tra tile</span>
+        <input type="number" id="sahi-overlap" min="0" max="0.9" step="0.05">
+      </label>
+      <label class="menu-toggle-row">
+        <span>
+          Predizione anche su frame intero<br>
+          <span class="hint">Aiuta su oggetti grandi, aggiunge una inference extra.</span>
+        </span>
+        <input type="checkbox" id="sahi-standard-pred">
+      </label>
+    </details>
+
     <div id="class-status"></div>
   </aside>
 
@@ -231,6 +365,113 @@
       .then(r => r.json())
       .then(d => renderClasses(d.available, d.selected))
       .catch(() => { classList.textContent = "Errore nel caricamento delle classi."; });
+
+    const sahiCheckbox = document.getElementById("sahi-checkbox");
+    sahiCheckbox.addEventListener("change", async () => {
+      try {
+        await fetch("/sahi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: sahiCheckbox.checked }),
+        });
+        showStatus("Aggiornato");
+      } catch (e) {
+        showStatus("Errore di rete");
+      }
+    });
+    fetch("/sahi")
+      .then(r => r.json())
+      .then(d => { sahiCheckbox.checked = d.enabled; });
+
+    const sliceSizeInput = document.getElementById("sahi-slice-size");
+    const overlapInput = document.getElementById("sahi-overlap");
+    const standardPredCheckbox = document.getElementById("sahi-standard-pred");
+
+    async function postSahiConfig(payload) {
+      try {
+        await fetch("/sahi-config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        showStatus("Aggiornato");
+      } catch (e) {
+        showStatus("Errore di rete");
+      }
+    }
+    sliceSizeInput.addEventListener("change", () => postSahiConfig({ slice_size: Number(sliceSizeInput.value) }));
+    overlapInput.addEventListener("change", () => postSahiConfig({ overlap_ratio: Number(overlapInput.value) }));
+    standardPredCheckbox.addEventListener("change", () => postSahiConfig({ standard_pred: standardPredCheckbox.checked }));
+
+    fetch("/sahi-config")
+      .then(r => r.json())
+      .then(d => {
+        sliceSizeInput.value = d.slice_size;
+        overlapInput.value = d.overlap_ratio;
+        standardPredCheckbox.checked = d.standard_pred;
+      });
+
+    const deviceCpuRadio = document.getElementById("device-cpu");
+    const deviceGpuRadio = document.getElementById("device-gpu");
+    const deviceUnavailableHint = document.getElementById("device-unavailable-hint");
+    const deviceStatus = document.getElementById("device-status");
+    let devicePollTimer = null;
+
+    function applyDeviceStatus(d) {
+      deviceCpuRadio.checked = d.device === "cpu";
+      deviceGpuRadio.checked = d.device === "gpu";
+      deviceGpuRadio.disabled = d.reloading || !d.gpu_available;
+      deviceCpuRadio.disabled = d.reloading;
+      deviceUnavailableHint.classList.toggle("hidden", d.gpu_available);
+      deviceStatus.classList.toggle("hidden", !d.reloading);
+      if (d.reloading) {
+        clearInterval(devicePollTimer);
+        devicePollTimer = setInterval(() => {
+          fetch("/device").then(r => r.json()).then(applyDeviceStatus);
+        }, 800);
+      } else {
+        clearInterval(devicePollTimer);
+      }
+    }
+
+    async function changeDevice(device) {
+      try {
+        const res = await fetch("/device", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ device }),
+        });
+        applyDeviceStatus(await res.json());
+      } catch (e) {
+        showStatus("Errore di rete");
+      }
+    }
+    deviceCpuRadio.addEventListener("change", () => changeDevice("cpu"));
+    deviceGpuRadio.addEventListener("change", () => changeDevice("gpu"));
+
+    fetch("/device").then(r => r.json()).then(applyDeviceStatus);
+
+    const fpsCheckbox = document.getElementById("fps-checkbox");
+    const fpsOverlay = document.getElementById("fps-overlay");
+    const FPS_VISIBLE_KEY = "dji-vision-show-fps";
+
+    function applyFpsVisibility(visible) {
+      fpsOverlay.classList.toggle("hidden", !visible);
+      fpsCheckbox.checked = visible;
+    }
+    applyFpsVisibility(localStorage.getItem(FPS_VISIBLE_KEY) !== "false");
+
+    fpsCheckbox.addEventListener("change", () => {
+      localStorage.setItem(FPS_VISIBLE_KEY, fpsCheckbox.checked);
+      applyFpsVisibility(fpsCheckbox.checked);
+    });
+
+    setInterval(() => {
+      fetch("/fps")
+        .then(r => r.json())
+        .then(d => { fpsOverlay.textContent = `${d.fps} FPS`; })
+        .catch(() => {});
+    }, 1000);
   </script>
 </body>
 </html>
