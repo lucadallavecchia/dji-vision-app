@@ -6,6 +6,7 @@
 <title>DJI Vision</title>
 <style>
   :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
   body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -31,7 +32,6 @@
     width: 100%;
     max-width: 1000px;
     padding: 0 8px 16px;
-    box-sizing: border-box;
   }
   img#stream {
     width: 100%;
@@ -39,6 +39,104 @@
     border-radius: 8px;
     display: block;
     background: #000;
+  }
+
+  /* Pulsante per aprire/chiudere il menu classi */
+  #menu-toggle {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 20;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1px solid #333;
+    background: #1c1c1c;
+    color: #eee;
+    font-size: 1.2rem;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+  #menu-toggle:active { transform: scale(0.95); }
+
+  /* Overlay che oscura lo sfondo quando il menu è aperto (mobile) */
+  #menu-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 15;
+  }
+  body.menu-open #menu-overlay {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Menu laterale a scomparsa */
+  #class-menu {
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: 260px;
+    max-width: 80vw;
+    background: #181818;
+    border-left: 1px solid #2a2a2a;
+    padding: 64px 16px 16px;
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+    z-index: 18;
+    overflow-y: auto;
+  }
+  body.menu-open #class-menu {
+    transform: translateX(0);
+  }
+  #class-menu h2 {
+    margin: 0 0 4px;
+    font-size: 0.95rem;
+  }
+  #class-menu .hint {
+    margin: 0 0 12px;
+    font-size: 0.75rem;
+    color: #999;
+  }
+  #class-menu .actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  #class-menu .actions button {
+    flex: 1;
+    background: #262626;
+    color: #eee;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  #class-list label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    font-size: 0.9rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #class-list label:hover { background: #222; }
+  #class-list input { width: 16px; height: 16px; }
+  #class-status {
+    margin-top: 10px;
+    font-size: 0.75rem;
+    color: #7ac47a;
+    min-height: 1em;
   }
 </style>
 </head>
@@ -50,10 +148,89 @@
   <div class="stream-wrap">
     <img id="stream" src="/stream" alt="Live stream">
   </div>
+
+  <button id="menu-toggle" aria-label="Impostazioni rilevamento" title="Classi da rilevare">☰</button>
+  <div id="menu-overlay"></div>
+  <aside id="class-menu">
+    <h2>Classi da rilevare</h2>
+    <p class="hint">Modifica visibile a tutti gli spettatori connessi.</p>
+    <div class="actions">
+      <button id="select-all">Tutte</button>
+      <button id="select-none">Nessuna</button>
+    </div>
+    <div id="class-list">Caricamento...</div>
+    <div id="class-status"></div>
+  </aside>
+
   <script>
     fetch("/info").then(r => r.json()).then(d => {
       document.getElementById("rtmp-url").textContent = d.rtmp_url;
     });
+
+    const menuToggle = document.getElementById("menu-toggle");
+    const menuOverlay = document.getElementById("menu-overlay");
+    const classList = document.getElementById("class-list");
+    const classStatus = document.getElementById("class-status");
+
+    function toggleMenu(open) {
+      document.body.classList.toggle("menu-open", open);
+    }
+    menuToggle.addEventListener("click", () => toggleMenu(!document.body.classList.contains("menu-open")));
+    menuOverlay.addEventListener("click", () => toggleMenu(false));
+
+    let statusTimer = null;
+    function showStatus(text) {
+      classStatus.textContent = text;
+      clearTimeout(statusTimer);
+      statusTimer = setTimeout(() => { classStatus.textContent = ""; }, 2000);
+    }
+
+    async function postSelection(selected) {
+      try {
+        await fetch("/classes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ classes: selected }),
+        });
+        showStatus("Aggiornato");
+      } catch (e) {
+        showStatus("Errore di rete");
+      }
+    }
+
+    function currentSelection() {
+      return Array.from(classList.querySelectorAll("input:checked")).map(i => i.value);
+    }
+
+    function renderClasses(available, selected) {
+      const selectedSet = new Set(selected);
+      classList.innerHTML = "";
+      available.forEach(name => {
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = name;
+        input.checked = selectedSet.has(name);
+        input.addEventListener("change", () => postSelection(currentSelection()));
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(name));
+        classList.appendChild(label);
+      });
+    }
+
+    document.getElementById("select-all").addEventListener("click", () => {
+      classList.querySelectorAll("input").forEach(i => i.checked = true);
+      postSelection(currentSelection());
+    });
+    document.getElementById("select-none").addEventListener("click", () => {
+      classList.querySelectorAll("input").forEach(i => i.checked = false);
+      postSelection(currentSelection());
+    });
+
+    fetch("/classes")
+      .then(r => r.json())
+      .then(d => renderClasses(d.available, d.selected))
+      .catch(() => { classList.textContent = "Errore nel caricamento delle classi."; });
   </script>
 </body>
 </html>
