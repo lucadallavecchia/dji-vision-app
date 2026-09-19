@@ -9,12 +9,18 @@ from ultralytics import YOLO
 
 RTSP_URL = "rtsp://127.0.0.1:8554/drone"
 DEFAULT_TARGET_CLASSES = {"person", "dog", "cat", "bird", "horse", "sheep", "cow"}
-MODEL_NAME = "yolo11n.pt"
-SAHI_SLICE_SIZE = 768
+MODEL_VARIANTS = {
+    "general": "yolo11n.pt",
+    "aerial-person": "yolo11n-aerial-person.pt",
+}
+DEFAULT_MODEL_VARIANT = "general"
+SAHI_SLICE_SIZE = 750
 SAHI_OVERLAP_RATIO = 0.2
 SAHI_STANDARD_PRED = False
 SAHI_SLICE_SIZE_RANGE = (128, 1536)
 SAHI_OVERLAP_RATIO_RANGE = (0.0, 0.9)
+DETECT_EVERY_DEFAULT = 1
+DETECT_EVERY_RANGE = (1, 30)
 
 CPU_BATCH_SIZE = 1
 GPU_BATCH_SIZE = 8
@@ -33,7 +39,7 @@ class VideoProcessor:
         self.gpu_torch_device = _detect_gpu_torch_device()
 
         self._model_lock = threading.Lock()
-        self.model, self.sahi_model = self._build_models("cpu")
+        self.model, self.sahi_model = self._build_models("cpu", MODEL_VARIANTS[DEFAULT_MODEL_VARIANT])
         self.class_names = self.model.names
 
         self._lock = threading.Lock()
@@ -48,17 +54,20 @@ class VideoProcessor:
         self.sahi_slice_size = SAHI_SLICE_SIZE
         self.sahi_overlap_ratio = SAHI_OVERLAP_RATIO
         self.sahi_standard_pred = SAHI_STANDARD_PRED
+        self.detect_every = DETECT_EVERY_DEFAULT
 
         self.processing_device = "cpu"
+        self.model_variant = DEFAULT_MODEL_VARIANT
         self.batch_size = CPU_BATCH_SIZE
         self.reloading = False
+        self._last_detections = []
 
-    def _build_models(self, torch_device):
-        model = YOLO(MODEL_NAME)
+    def _build_models(self, torch_device, model_name):
+        model = YOLO(model_name)
         model.to(torch_device)
         sahi_model = AutoDetectionModel.from_pretrained(
             model_type="ultralytics",
-            model_path=MODEL_NAME,
+            model_path=model_name,
             confidence_threshold=0.25,
             device=torch_device,
         )
@@ -80,18 +89,42 @@ class VideoProcessor:
             if device == self.processing_device or self.reloading:
                 return
             self.reloading = True
-        threading.Thread(target=self._reload_models, args=(device,), daemon=True).start()
+        threading.Thread(target=self._reload_models, args=(device, self.model_variant), daemon=True).start()
 
-    def _reload_models(self, device):
+    def get_model_status(self):
+        with self._config_lock:
+            return {
+                "variant": self.model_variant,
+                "reloading": self.reloading,
+                "available": list(MODEL_VARIANTS.keys()),
+            }
+
+    def set_model_variant(self, variant):
+        if variant not in MODEL_VARIANTS:
+            return
+        with self._config_lock:
+            if variant == self.model_variant or self.reloading:
+                return
+            self.reloading = True
+        threading.Thread(target=self._reload_models, args=(self.processing_device, variant), daemon=True).start()
+
+    def _reload_models(self, device, model_variant):
         torch_device = self.gpu_torch_device if device == "gpu" else "cpu"
         batch_size = GPU_BATCH_SIZE if device == "gpu" else CPU_BATCH_SIZE
-        model, sahi_model = self._build_models(torch_device)
+        model, sahi_model = self._build_models(torch_device, MODEL_VARIANTS[model_variant])
+        class_names = model.names
         with self._model_lock:
             self.model = model
             self.sahi_model = sahi_model
         with self._config_lock:
+            variant_changed = model_variant != self.model_variant
+            self.class_names = class_names
             self.processing_device = device
+            self.model_variant = model_variant
             self.batch_size = batch_size
+            if variant_changed:
+                self.target_ids = [i for i, n in class_names.items() if n in DEFAULT_TARGET_CLASSES]
+                self._last_detections = []
             self.reloading = False
 
     def get_available_classes(self):
@@ -136,6 +169,15 @@ class VideoProcessor:
             if standard_pred is not None:
                 self.sahi_standard_pred = bool(standard_pred)
 
+    def get_detect_every(self):
+        with self._config_lock:
+            return self.detect_every
+
+    def set_detect_every(self, n):
+        lo, hi = DETECT_EVERY_RANGE
+        with self._config_lock:
+            self.detect_every = max(lo, min(hi, int(n)))
+
     def start(self):
         self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -153,6 +195,7 @@ class VideoProcessor:
     def _run(self):
         cap = None
         last_frame_time = None
+        frame_counter = 0
         while self._running:
             if cap is None or not cap.isOpened():
                 cap = cv2.VideoCapture(RTSP_URL)
@@ -174,19 +217,22 @@ class VideoProcessor:
                 overlap_ratio = self.sahi_overlap_ratio
                 standard_pred = self.sahi_standard_pred
                 batch_size = self.batch_size
+                detect_every = self.detect_every
 
-            with self._model_lock:
-                model = self.model
-                sahi_model = self.sahi_model
+            frame_counter += 1
+            if frame_counter % detect_every == 0:
+                with self._model_lock:
+                    model = self.model
+                    sahi_model = self.sahi_model
 
-            if sahi_enabled:
-                detections = self._detect_sahi(
-                    frame, sahi_model, target_ids, slice_size, overlap_ratio, standard_pred, batch_size
-                )
-            else:
-                detections = self._detect_yolo(frame, model, target_ids)
+                if sahi_enabled:
+                    self._last_detections = self._detect_sahi(
+                        frame, sahi_model, target_ids, slice_size, overlap_ratio, standard_pred, batch_size
+                    )
+                else:
+                    self._last_detections = self._detect_yolo(frame, model, target_ids)
 
-            for x1, y1, x2, y2, cls_id, conf in detections:
+            for x1, y1, x2, y2, cls_id, conf in self._last_detections:
                 label = f"{self.class_names[cls_id]} {conf:.2f}"
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.putText(

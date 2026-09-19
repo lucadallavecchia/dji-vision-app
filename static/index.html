@@ -165,13 +165,16 @@
     padding: 6px 4px;
     font-size: 0.85rem;
   }
-  .field-row input[type="number"] {
-    width: 70px;
+  .field-row input[type="number"],
+  .field-row select {
     background: #262626;
     color: #eee;
     border: 1px solid #333;
     border-radius: 6px;
     padding: 4px 6px;
+  }
+  .field-row input[type="number"] {
+    width: 70px;
   }
   .device-options {
     display: flex;
@@ -194,6 +197,17 @@
     padding: 4px;
   }
   #device-status.hidden {
+    display: none;
+  }
+  #model-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: #999;
+    padding: 4px;
+  }
+  #model-status.hidden {
     display: none;
   }
   .spinner {
@@ -262,6 +276,14 @@
       <summary>Modello di rilevamento</summary>
       <p class="hint">Modifica visibile a tutti gli spettatori connessi.</p>
       <div class="device-options">
+        <label><input type="radio" name="model" id="model-general" value="general"> Generale (80 classi)</label>
+        <label><input type="radio" name="model" id="model-aerial" value="aerial-person"> Aereo — solo persone</label>
+      </div>
+      <p class="hint">Il modello "Aereo" è ottimizzato per persone viste dall'alto (fine-tuned), ma riconosce solo la classe persona — usa "Generale" per rilevare anche animali.</p>
+      <div id="model-status" class="hidden">
+        <span class="spinner"></span>Ricaricamento modello...
+      </div>
+      <div class="device-options">
         <label><input type="radio" name="device" id="device-cpu" value="cpu"> CPU</label>
         <label><input type="radio" name="device" id="device-gpu" value="gpu"> GPU (Metal)</label>
       </div>
@@ -278,6 +300,16 @@
       </label>
       <label class="field-row">
         <span>Dimensione tile (px)</span>
+        <select id="sahi-slice-size-select">
+          <option value="750">750 (più fluido)</option>
+          <option value="640">640</option>
+          <option value="512">512</option>
+          <option value="384">384 (più recall)</option>
+          <option value="custom">Personalizzato…</option>
+        </select>
+      </label>
+      <label class="field-row hidden" id="sahi-slice-size-custom-row">
+        <span>Valore personalizzato (px)</span>
         <input type="number" id="sahi-slice-size" min="128" max="1536" step="32">
       </label>
       <label class="field-row">
@@ -290,6 +322,13 @@
           <span class="hint">Aiuta su oggetti grandi, aggiunge una inference extra.</span>
         </span>
         <input type="checkbox" id="sahi-standard-pred">
+      </label>
+      <label class="field-row">
+        <span>
+          Rileva ogni N frame<br>
+          <span class="hint">1 = ogni frame. Valori più alti mantengono il video fluido quando la detection è lenta (i box restano visibili tra un aggiornamento e l'altro).</span>
+        </span>
+        <input type="number" id="detect-every" min="1" max="30" step="1">
       </label>
     </details>
 
@@ -383,9 +422,12 @@
       .then(r => r.json())
       .then(d => { sahiCheckbox.checked = d.enabled; });
 
+    const sliceSizeSelect = document.getElementById("sahi-slice-size-select");
+    const sliceSizeCustomRow = document.getElementById("sahi-slice-size-custom-row");
     const sliceSizeInput = document.getElementById("sahi-slice-size");
     const overlapInput = document.getElementById("sahi-overlap");
     const standardPredCheckbox = document.getElementById("sahi-standard-pred");
+    const SLICE_SIZE_PRESETS = ["750", "640", "512", "384"];
 
     async function postSahiConfig(payload) {
       try {
@@ -399,6 +441,27 @@
         showStatus("Errore di rete");
       }
     }
+
+    function applySliceSize(sliceSize) {
+      const asString = String(sliceSize);
+      if (SLICE_SIZE_PRESETS.includes(asString)) {
+        sliceSizeSelect.value = asString;
+        sliceSizeCustomRow.classList.add("hidden");
+      } else {
+        sliceSizeSelect.value = "custom";
+        sliceSizeCustomRow.classList.remove("hidden");
+      }
+      sliceSizeInput.value = sliceSize;
+    }
+
+    sliceSizeSelect.addEventListener("change", () => {
+      if (sliceSizeSelect.value === "custom") {
+        sliceSizeCustomRow.classList.remove("hidden");
+        return;
+      }
+      sliceSizeCustomRow.classList.add("hidden");
+      postSahiConfig({ slice_size: Number(sliceSizeSelect.value) });
+    });
     sliceSizeInput.addEventListener("change", () => postSahiConfig({ slice_size: Number(sliceSizeInput.value) }));
     overlapInput.addEventListener("change", () => postSahiConfig({ overlap_ratio: Number(overlapInput.value) }));
     standardPredCheckbox.addEventListener("change", () => postSahiConfig({ standard_pred: standardPredCheckbox.checked }));
@@ -406,10 +469,27 @@
     fetch("/sahi-config")
       .then(r => r.json())
       .then(d => {
-        sliceSizeInput.value = d.slice_size;
+        applySliceSize(d.slice_size);
         overlapInput.value = d.overlap_ratio;
         standardPredCheckbox.checked = d.standard_pred;
       });
+
+    const detectEveryInput = document.getElementById("detect-every");
+    detectEveryInput.addEventListener("change", async () => {
+      try {
+        await fetch("/detect-every", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ n: Number(detectEveryInput.value) }),
+        });
+        showStatus("Aggiornato");
+      } catch (e) {
+        showStatus("Errore di rete");
+      }
+    });
+    fetch("/detect-every")
+      .then(r => r.json())
+      .then(d => { detectEveryInput.value = d.n; });
 
     const deviceCpuRadio = document.getElementById("device-cpu");
     const deviceGpuRadio = document.getElementById("device-gpu");
@@ -450,6 +530,51 @@
     deviceGpuRadio.addEventListener("change", () => changeDevice("gpu"));
 
     fetch("/device").then(r => r.json()).then(applyDeviceStatus);
+
+    const modelGeneralRadio = document.getElementById("model-general");
+    const modelAerialRadio = document.getElementById("model-aerial");
+    const modelStatus = document.getElementById("model-status");
+    let modelPollTimer = null;
+
+    function refreshClassList() {
+      fetch("/classes")
+        .then(r => r.json())
+        .then(d => renderClasses(d.available, d.selected));
+    }
+
+    function applyModelStatus(d) {
+      modelGeneralRadio.checked = d.variant === "general";
+      modelAerialRadio.checked = d.variant === "aerial-person";
+      modelGeneralRadio.disabled = d.reloading;
+      modelAerialRadio.disabled = d.reloading;
+      modelStatus.classList.toggle("hidden", !d.reloading);
+      if (d.reloading) {
+        clearInterval(modelPollTimer);
+        modelPollTimer = setInterval(() => {
+          fetch("/model").then(r => r.json()).then(applyModelStatus);
+        }, 800);
+      } else {
+        clearInterval(modelPollTimer);
+        refreshClassList();
+      }
+    }
+
+    async function changeModel(variant) {
+      try {
+        const res = await fetch("/model", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ variant }),
+        });
+        applyModelStatus(await res.json());
+      } catch (e) {
+        showStatus("Errore di rete");
+      }
+    }
+    modelGeneralRadio.addEventListener("change", () => changeModel("general"));
+    modelAerialRadio.addEventListener("change", () => changeModel("aerial-person"));
+
+    fetch("/model").then(r => r.json()).then(applyModelStatus);
 
     const fpsCheckbox = document.getElementById("fps-checkbox");
     const fpsOverlay = document.getElementById("fps-overlay");

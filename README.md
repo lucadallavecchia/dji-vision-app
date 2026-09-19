@@ -66,6 +66,36 @@ anche da altri dispositivi (iOS, Android, altri computer) via browser sulla stes
    dispositivo (telefono, tablet, altro PC) sulla stessa rete Wi-Fi, apri
    `http://<ip-stampato>:8000` nel browser.
 
+## Test senza drone reale
+
+Per provare l'app (detection, SAHI, switch CPU/GPU) senza avere il drone a disposizione,
+puoi avviarla in **modalità test**: pubblica in automatico un video locale sull'endpoint
+RTMP al posto di DJI Fly. Richiede [ffmpeg](https://ffmpeg.org/) installato
+(`brew install ffmpeg` su Mac).
+
+```bash
+python main.py --test                        # usa test-data/aereo_test.mp4 di default
+python main.py --test path/al/tuo/video.mp4   # oppure un video a scelta
+```
+
+Il comportamento normale (`python main.py`, in attesa del drone reale) resta invariato.
+
+**Procurarsi un video aereo di test**: un buon punto di partenza è il dataset
+[VisDrone](https://github.com/VisDrone/VisDrone-Dataset) (task "Object Detection in
+Videos", valset), che ha soggetti in movimento (persone, veicoli...) ripresi da drone.
+Fornisce però sequenze di frame JPEG numerati invece di file video, quindi vanno prima
+ricomposti in un `.mp4`:
+
+```bash
+ffmpeg -r 25 -i sequences/<nome_sequenza>/%07d.jpg \
+  -c:v libx264 -pix_fmt yuv420p test-data/aereo_test.mp4
+```
+
+`%07d` presuppone nomi file a 7 cifre con zero padding (es. `0000001.jpg`) — verifica il
+pattern nella cartella scaricata e correggilo se necessario. La cartella `test-data/` è
+già esclusa da `.gitignore`, comoda per tenerci dataset/video di prova senza rischiare di
+committarli.
+
 ## Note
 
 - Tutti i dispositivi (host + spettatori) devono essere sulla stessa rete locale.

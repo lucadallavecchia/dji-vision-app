@@ -109,6 +109,36 @@ def set_device(payload: DevicePayload):
     return processor.get_device_status()
 
 
+class ModelPayload(BaseModel):
+    variant: str
+
+
+@app.get("/model")
+def get_model():
+    return processor.get_model_status()
+
+
+@app.post("/model")
+def set_model(payload: ModelPayload):
+    processor.set_model_variant(payload.variant)
+    return processor.get_model_status()
+
+
+class DetectEveryPayload(BaseModel):
+    n: int
+
+
+@app.get("/detect-every")
+def get_detect_every():
+    return {"n": processor.get_detect_every()}
+
+
+@app.post("/detect-every")
+def set_detect_every(payload: DetectEveryPayload):
+    processor.set_detect_every(payload.n)
+    return {"n": processor.get_detect_every()}
+
+
 def mjpeg_generator():
     boundary = b"--frame"
     while True:

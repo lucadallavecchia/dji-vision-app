@@ -18,8 +18,12 @@ mediamtx/auto.key
 # Modello YOLO scaricato automaticamente al primo avvio
 *.pt
 
+# Dataset/video di test scaricati manualmente (es. VisDrone), non parte del repo
+test-data/
+
 # PyCharm
 .idea/
 
 # macOS
 .DS_Store
+kaggle-output/
