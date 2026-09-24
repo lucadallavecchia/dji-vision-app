@@ -1,5 +1,6 @@
 import threading
 import time
+from pathlib import Path
 
 import cv2
 import torch
@@ -13,13 +14,13 @@ MODEL_VARIANTS = {
     "general": "yolo11n.pt",
     "aerial-person": "yolo11n-aerial-person.pt",
 }
-DEFAULT_MODEL_VARIANT = "general"
+DEFAULT_MODEL_VARIANT = "aerial-person"
 SAHI_SLICE_SIZE = 750
 SAHI_OVERLAP_RATIO = 0.2
 SAHI_STANDARD_PRED = False
 SAHI_SLICE_SIZE_RANGE = (128, 1536)
 SAHI_OVERLAP_RATIO_RANGE = (0.0, 0.9)
-DETECT_EVERY_DEFAULT = 1
+DETECT_EVERY_DEFAULT = 2
 DETECT_EVERY_RANGE = (1, 30)
 
 CPU_BATCH_SIZE = 1
@@ -48,7 +49,7 @@ class VideoProcessor:
         self.gpu_torch_device = _detect_gpu_torch_device()
 
         self._model_lock = threading.Lock()
-        self.model_path = model_path or MODEL_VARIANTS[DEFAULT_MODEL_VARIANT]
+        self.model_path = model_path or self._resolve_default_model_path()
         self.model, self.sahi_model = self._build_models("cpu", self.model_path)
         self.class_names = self.model.names
 
@@ -70,7 +71,26 @@ class VideoProcessor:
         self.model_variant = _variant_for_model_path(self.model_path)
         self.batch_size = CPU_BATCH_SIZE
         self.reloading = False
+        self.reload_error = None
         self._last_detections = []
+
+    @staticmethod
+    def _resolve_default_model_path():
+        """Modello con cui parte l'app. DEFAULT_MODEL_VARIANT può puntare a un checkpoint
+        custom (es. yolo11n-aerial-person.pt, fine-tuned in casa, non su Ultralytics Hub):
+        se manca sul disco — tipicamente al primo avvio su una macchina diversa da quella
+        di training/sviluppo — niente auto-download è possibile per quel file, quindi
+        ripieghiamo sul modello "general", che Ultralytics scarica da sé in automatico."""
+        default_path = MODEL_VARIANTS[DEFAULT_MODEL_VARIANT]
+        if DEFAULT_MODEL_VARIANT != "general" and not Path(default_path).exists():
+            fallback = MODEL_VARIANTS["general"]
+            print(
+                f"ATTENZIONE: modello di default '{default_path}' non trovato sul disco, "
+                f"uso '{fallback}' al suo posto (passa a '{DEFAULT_MODEL_VARIANT}' dalla UI "
+                "una volta procurato il file)."
+            )
+            return fallback
+        return default_path
 
     def _build_models(self, torch_device, model_name):
         model = YOLO(model_name)
@@ -90,6 +110,7 @@ class VideoProcessor:
                 "reloading": self.reloading,
                 "gpu_available": self.gpu_torch_device is not None,
                 "gpu_backend": self.gpu_torch_device,  # "cuda" | "mps" | None
+                "error": self.reload_error,
             }
 
     def set_processing_device(self, device):
@@ -108,6 +129,7 @@ class VideoProcessor:
                 "variant": self.model_variant,
                 "reloading": self.reloading,
                 "available": list(MODEL_VARIANTS.keys()),
+                "error": self.reload_error,
             }
 
     def set_model_variant(self, variant):
@@ -122,21 +144,41 @@ class VideoProcessor:
     def _reload_models(self, device, model_path):
         torch_device = self.gpu_torch_device if device == "gpu" else "cpu"
         batch_size = GPU_BATCH_SIZE if device == "gpu" else CPU_BATCH_SIZE
-        model, sahi_model = self._build_models(torch_device, model_path)
+        try:
+            model, sahi_model = self._build_models(torch_device, model_path)
+        except Exception as e:
+            # Es. model_path punta a un checkpoint custom mancante sul disco (vedi
+            # _resolve_default_model_path). Senza questo except, un'eccezione qui lascia
+            # reloading=True per sempre: lo spinner nella UI gira all'infinito e i radio
+            # restano disabilitati finché non si riavvia l'app.
+            print(f"Cambio modello/device fallito ({model_path}, {device}): {e}")
+            with self._config_lock:
+                self.reloading = False
+                self.reload_error = str(e)
+            return
         class_names = model.names
         with self._model_lock:
             self.model = model
             self.sahi_model = sahi_model
         with self._config_lock:
             path_changed = model_path != self.model_path
+            # Svuotata PRIMA di sostituire class_names: _run() legge entrambi senza lock
+            # (per non bloccare lo streaming durante un reload), quindi se l'ordine fosse
+            # invertito un frame potrebbe leggere class_names già nuovo ma detection
+            # ancora vecchie, con cls_id che non esistono più nel nuovo modello (es. da
+            # 80 classi a 1 sola) -> KeyError e thread di detection morto (video
+            # congelato). Vedi anche il fallback in _run() più sotto, seconda rete di
+            # sicurezza sulla stessa razza di problema.
+            if path_changed:
+                self._last_detections = []
             self.class_names = class_names
             self.processing_device = device
             self.model_path = model_path
             self.model_variant = _variant_for_model_path(model_path)
             self.batch_size = batch_size
+            self.reload_error = None
             if path_changed:
                 self.target_ids = [i for i, n in class_names.items() if n in DEFAULT_TARGET_CLASSES]
-                self._last_detections = []
             self.reloading = False
 
     def get_available_classes(self):
@@ -222,46 +264,61 @@ class VideoProcessor:
                 time.sleep(0.5)
                 continue
 
-            with self._config_lock:
-                target_ids = list(self.target_ids)
-                sahi_enabled = self.sahi_enabled
-                slice_size = self.sahi_slice_size
-                overlap_ratio = self.sahi_overlap_ratio
-                standard_pred = self.sahi_standard_pred
-                batch_size = self.batch_size
-                detect_every = self.detect_every
+            try:
+                with self._config_lock:
+                    target_ids = list(self.target_ids)
+                    sahi_enabled = self.sahi_enabled
+                    slice_size = self.sahi_slice_size
+                    overlap_ratio = self.sahi_overlap_ratio
+                    standard_pred = self.sahi_standard_pred
+                    batch_size = self.batch_size
+                    detect_every = self.detect_every
 
-            frame_counter += 1
-            if frame_counter % detect_every == 0:
-                with self._model_lock:
-                    model = self.model
-                    sahi_model = self.sahi_model
+                frame_counter += 1
+                if frame_counter % detect_every == 0:
+                    with self._model_lock:
+                        model = self.model
+                        sahi_model = self.sahi_model
 
-                if sahi_enabled:
-                    self._last_detections = self._detect_sahi(
-                        frame, sahi_model, target_ids, slice_size, overlap_ratio, standard_pred, batch_size
+                    if sahi_enabled:
+                        self._last_detections = self._detect_sahi(
+                            frame, sahi_model, target_ids, slice_size, overlap_ratio, standard_pred, batch_size
+                        )
+                    else:
+                        self._last_detections = self._detect_yolo(frame, model, target_ids)
+
+                class_names = self.class_names
+                for x1, y1, x2, y2, cls_id, conf in self._last_detections:
+                    name = class_names.get(cls_id)
+                    if name is None:
+                        # Detection residua di un modello appena sostituito (cambio
+                        # variante a metà giro) i cui id classe non esistono più nel
+                        # nuovo class_names: la scartiamo invece di far esplodere il
+                        # thread (vedi commento in _reload_models).
+                        continue
+                    label = f"{name} {conf:.2f}"
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(
+                        frame, label, (x1, max(y1 - 8, 0)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
                     )
-                else:
-                    self._last_detections = self._detect_yolo(frame, model, target_ids)
 
-            for x1, y1, x2, y2, cls_id, conf in self._last_detections:
-                label = f"{self.class_names[cls_id]} {conf:.2f}"
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(
-                    frame, label, (x1, max(y1 - 8, 0)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
-                )
+                ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
 
-            ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                now = time.monotonic()
+                instant_fps = 1 / (now - last_frame_time) if last_frame_time else 0.0
+                last_frame_time = now
 
-            now = time.monotonic()
-            instant_fps = 1 / (now - last_frame_time) if last_frame_time else 0.0
-            last_frame_time = now
-
-            with self._lock:
-                if ok:
-                    self._latest_jpeg = jpeg.tobytes()
-                self._fps = self._fps * 0.9 + instant_fps * 0.1 if self._fps else instant_fps
+                with self._lock:
+                    if ok:
+                        self._latest_jpeg = jpeg.tobytes()
+                    self._fps = self._fps * 0.9 + instant_fps * 0.1 if self._fps else instant_fps
+            except Exception as e:
+                # Rete di sicurezza generale: qualunque errore imprevisto nell'elaborazione
+                # di un frame non deve congelare per sempre lo streaming (il thread è
+                # daemon e non viene mai riavviato da solo se muore). Si salta il frame e
+                # si continua con il prossimo invece di uccidere il loop.
+                print(f"Errore nell'elaborazione del frame, salto: {e}")
 
         if cap:
             cap.release()

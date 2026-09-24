@@ -3,9 +3,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 App desktop (Mac, Windows, Linux) che riceve lo streaming RTMP da DJI Fly (drone DJI Mini 3
-Pro), esegue detection di persone/animali (YOLO, CPU o GPU a seconda di cosa trova sulla
-macchina) e mostra il video con i bounding box, accessibile anche da altri dispositivi
-(iOS, Android, altri computer) via browser sulla stessa rete.
+Pro), esegue detection di persone viste dall'alto (YOLO fine-tuned su riprese aeree, CPU o
+GPU a seconda di cosa trova sulla macchina) e mostra il video con i bounding box, accessibile
+anche da altri dispositivi (iOS, Android, altri computer) via browser sulla stessa rete. Dalla
+UI si può passare al modello generale (80 classi COCO, persone e animali) quando serve.
 
 ## Setup
 
@@ -27,7 +28,15 @@ macchina) e mostra il video con i bounding box, accessibile anche da altri dispo
    - il binario di [MediaMTX](https://github.com/bluenviron/mediamtx) giusto per la tua
      piattaforma (Mac Apple Silicon/Intel, Windows, Linux x86_64/arm64), niente da
      scaricare a mano;
-   - il modello YOLO (`yolo11n.pt`).
+   - il modello YOLO generale (`yolo11n.pt`).
+
+   Il modello di default della UI è quello "Aereo — solo persone"
+   (`yolo11n-aerial-person.pt`), un checkpoint fine-tuned in casa che **non** si scarica
+   da solo (non essendo un modello ufficiale Ultralytics): se il file non è presente sul
+   disco — capita di sicuro al primo avvio su una macchina diversa da quella di sviluppo —
+   l'app ripiega in automatico sul modello generale e lo segnala in console. Il modello
+   "Aereo" richiede di allenartelo tu (vedi [`tools/train_aerial_person.ipynb`](tools/train_aerial_person.ipynb))
+   e mettere il file risultante nella root del progetto.
 
    Se la piattaforma non viene riconosciuta (caso raro), l'app stampa un errore con le
    istruzioni per scaricare MediaMTX a mano da
@@ -108,9 +117,12 @@ committarli.
 ## Note
 
 - Tutti i dispositivi (host + spettatori) devono essere sulla stessa rete locale.
-- Le classi rilevate di default sono: persona, cane, gatto, uccello, cavallo,
-  pecora, mucca (modificabile in `detection.py`, `TARGET_CLASSES`).
-- Per ridurre il carico CPU puoi processare 1 frame ogni N in `detection.py`.
+- Di default rileva solo persone (modello "Aereo"). Passando a "Generale" dalla UI, le
+  classi rilevate di default sono: persona, cane, gatto, uccello, cavallo, pecora, mucca
+  (modificabile in `detection.py`, `DEFAULT_TARGET_CLASSES`), oppure scegli a mano dal
+  menu "Classi da rilevare".
+- Per ridurre il carico CPU puoi processare 1 frame ogni N dal menu "Modello di
+  rilevamento" della UI, o cambiando `DETECT_EVERY_DEFAULT` in `detection.py`.
 
 ## Per sviluppatori
 
