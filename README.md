@@ -1,5 +1,7 @@
 # DJI Vision
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 App desktop (Mac/Windows) che riceve lo streaming RTMP da DJI Fly (drone DJI Mini 3 Pro),
 esegue detection di persone/animali (YOLO) e mostra il video con i bounding box, accessibile
 anche da altri dispositivi (iOS, Android, altri computer) via browser sulla stessa rete.
@@ -102,3 +104,10 @@ committarli.
 - Le classi rilevate di default sono: persona, cane, gatto, uccello, cavallo,
   pecora, mucca (modificabile in `detection.py`, `TARGET_CLASSES`).
 - Per ridurre il carico CPU puoi processare 1 frame ogni N in `detection.py`.
+
+## Per sviluppatori
+
+- [`docs/NOTES.md`](docs/NOTES.md) — decisioni architetturali e stato di avanzamento del progetto.
+- [`docs/EVALUATION.md`](docs/EVALUATION.md) — risultati dei test di accuratezza (recall/precision) su riprese aeree.
+- [`tools/evaluate.py`](tools/evaluate.py) — valutazione offline contro ground truth, indipendente dall'app live.
+- [`tools/prepare_finetune_dataset.py`](tools/prepare_finetune_dataset.py) e [`tools/train_aerial_person.ipynb`](tools/train_aerial_person.ipynb) — pipeline di fine-tuning del modello aereo (dataset prep locale + training notebook per Kaggle).

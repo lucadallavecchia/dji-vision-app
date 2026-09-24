@@ -34,12 +34,22 @@ def _detect_gpu_torch_device():
     return None
 
 
+def _variant_for_model_path(model_path):
+    """Nome della variante nota (MODEL_VARIANTS) corrispondente a un path di modello,
+    o None se è un .pt arbitrario non tra le varianti (es. passato da tools/evaluate.py)."""
+    return next((k for k, v in MODEL_VARIANTS.items() if v == model_path), None)
+
+
 class VideoProcessor:
-    def __init__(self):
+    def __init__(self, model_path=None):
+        """model_path: .pt da caricare all'avvio invece della variante di default. Pensato
+        per tools/evaluate.py, che vuole valutare modelli arbitrari (es. yolo11s.pt) senza
+        passare dalle due varianti fisse esposte in UI (general/aerial-person)."""
         self.gpu_torch_device = _detect_gpu_torch_device()
 
         self._model_lock = threading.Lock()
-        self.model, self.sahi_model = self._build_models("cpu", MODEL_VARIANTS[DEFAULT_MODEL_VARIANT])
+        self.model_path = model_path or MODEL_VARIANTS[DEFAULT_MODEL_VARIANT]
+        self.model, self.sahi_model = self._build_models("cpu", self.model_path)
         self.class_names = self.model.names
 
         self._lock = threading.Lock()
@@ -57,7 +67,7 @@ class VideoProcessor:
         self.detect_every = DETECT_EVERY_DEFAULT
 
         self.processing_device = "cpu"
-        self.model_variant = DEFAULT_MODEL_VARIANT
+        self.model_variant = _variant_for_model_path(self.model_path)
         self.batch_size = CPU_BATCH_SIZE
         self.reloading = False
         self._last_detections = []
@@ -89,7 +99,7 @@ class VideoProcessor:
             if device == self.processing_device or self.reloading:
                 return
             self.reloading = True
-        threading.Thread(target=self._reload_models, args=(device, self.model_variant), daemon=True).start()
+        threading.Thread(target=self._reload_models, args=(device, self.model_path), daemon=True).start()
 
     def get_model_status(self):
         with self._config_lock:
@@ -106,23 +116,24 @@ class VideoProcessor:
             if variant == self.model_variant or self.reloading:
                 return
             self.reloading = True
-        threading.Thread(target=self._reload_models, args=(self.processing_device, variant), daemon=True).start()
+        threading.Thread(target=self._reload_models, args=(self.processing_device, MODEL_VARIANTS[variant]), daemon=True).start()
 
-    def _reload_models(self, device, model_variant):
+    def _reload_models(self, device, model_path):
         torch_device = self.gpu_torch_device if device == "gpu" else "cpu"
         batch_size = GPU_BATCH_SIZE if device == "gpu" else CPU_BATCH_SIZE
-        model, sahi_model = self._build_models(torch_device, MODEL_VARIANTS[model_variant])
+        model, sahi_model = self._build_models(torch_device, model_path)
         class_names = model.names
         with self._model_lock:
             self.model = model
             self.sahi_model = sahi_model
         with self._config_lock:
-            variant_changed = model_variant != self.model_variant
+            path_changed = model_path != self.model_path
             self.class_names = class_names
             self.processing_device = device
-            self.model_variant = model_variant
+            self.model_path = model_path
+            self.model_variant = _variant_for_model_path(model_path)
             self.batch_size = batch_size
-            if variant_changed:
+            if path_changed:
                 self.target_ids = [i for i, n in class_names.items() if n in DEFAULT_TARGET_CLASSES]
                 self._last_detections = []
             self.reloading = False
