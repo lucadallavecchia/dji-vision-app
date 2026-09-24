@@ -1,3 +1,4 @@
+import platform
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -100,7 +101,7 @@ class DevicePayload(BaseModel):
 
 @app.get("/device")
 def get_device():
-    return processor.get_device_status()
+    return {**processor.get_device_status(), "os": platform.system()}
 
 
 @app.post("/device")

@@ -155,17 +155,18 @@ def main():
         ))
 
     if processor.gpu_torch_device:
+        gpu_label = {"cuda": "CUDA", "mps": "Metal"}.get(processor.gpu_torch_device, processor.gpu_torch_device)
         processor.set_processing_device("gpu")
         while processor.get_device_status()["reloading"]:
             time.sleep(0.2)
 
         results.append(evaluate_config(
             processor, False, target_ids, frame_paths, gt_by_frame, args.iou,
-            "2) GPU (Metal), no SAHI",
+            f"2) GPU ({gpu_label}), no SAHI",
         ))
         results.append(evaluate_config(
             processor, True, target_ids, frame_paths, gt_by_frame, args.iou,
-            f"3) GPU (Metal) + SAHI (tile {args.slice_size}px, overlap {args.overlap})",
+            f"3) GPU ({gpu_label}) + SAHI (tile {args.slice_size}px, overlap {args.overlap})",
         ))
     else:
         print("\nGPU non disponibile su questa macchina: salto i test 2 e 3.")

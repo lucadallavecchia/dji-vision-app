@@ -89,6 +89,7 @@ class VideoProcessor:
                 "device": self.processing_device,
                 "reloading": self.reloading,
                 "gpu_available": self.gpu_torch_device is not None,
+                "gpu_backend": self.gpu_torch_device,  # "cuda" | "mps" | None
             }
 
     def set_processing_device(self, device):

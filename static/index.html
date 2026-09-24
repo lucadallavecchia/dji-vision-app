@@ -285,7 +285,7 @@
       </div>
       <div class="device-options">
         <label><input type="radio" name="device" id="device-cpu" value="cpu"> CPU</label>
-        <label><input type="radio" name="device" id="device-gpu" value="gpu"> GPU (Metal)</label>
+        <label><input type="radio" name="device" id="device-gpu" value="gpu"> GPU <span id="device-gpu-label"></span></label>
       </div>
       <p class="hint hidden" id="device-unavailable-hint">GPU non disponibile su questo dispositivo.</p>
       <div id="device-status" class="hidden">
@@ -493,15 +493,21 @@
 
     const deviceCpuRadio = document.getElementById("device-cpu");
     const deviceGpuRadio = document.getElementById("device-gpu");
+    const deviceGpuLabel = document.getElementById("device-gpu-label");
     const deviceUnavailableHint = document.getElementById("device-unavailable-hint");
     const deviceStatus = document.getElementById("device-status");
     let devicePollTimer = null;
+
+    // Etichetta del backend GPU, in base a cosa rileva torch sulla piattaforma corrente
+    // (non assumiamo più Apple Silicon: su Windows/Linux con NVIDIA sarà CUDA).
+    const GPU_BACKEND_LABELS = { cuda: "(CUDA)", mps: "(Metal)" };
 
     function applyDeviceStatus(d) {
       deviceCpuRadio.checked = d.device === "cpu";
       deviceGpuRadio.checked = d.device === "gpu";
       deviceGpuRadio.disabled = d.reloading || !d.gpu_available;
       deviceCpuRadio.disabled = d.reloading;
+      deviceGpuLabel.textContent = GPU_BACKEND_LABELS[d.gpu_backend] || "";
       deviceUnavailableHint.classList.toggle("hidden", d.gpu_available);
       deviceStatus.classList.toggle("hidden", !d.reloading);
       if (d.reloading) {
