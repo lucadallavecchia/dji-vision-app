@@ -200,6 +200,16 @@ def main():
     time.sleep(1)
 
     test_publisher_proc = None
+
+    def cleanup(*_args):
+        # Chiamata sia dall'evento "closed" della finestra sia dal finally sotto: guardata
+        # con poll() perché può girare due volte (rischio, se non guardata, di mandare
+        # SIGTERM a un PID nel frattempo riciclato dall'OS per un processo estraneo).
+        if test_publisher_proc and test_publisher_proc.poll() is None:
+            test_publisher_proc.terminate()
+        if mediamtx_proc.poll() is None:
+            mediamtx_proc.terminate()
+
     try:
         test_publisher_proc = start_test_publisher(test_video_path) if test_video_path else None
 
@@ -207,12 +217,16 @@ def main():
         server_thread.start()
         wait_for_server("http://127.0.0.1:8000")
 
-        webview.create_window("DJI Vision", "http://127.0.0.1:8000", width=1000, height=700)
+        window = webview.create_window("DJI Vision", "http://127.0.0.1:8000", width=1000, height=700)
+        # Rete di sicurezza: su macOS abbiamo osservato webview.start() terminare il
+        # processo (es. su SIGINT mentre gira il run loop nativo di Cocoa) senza lasciar
+        # girare il finally sottostante, orfanando MediaMTX. L'evento "closed" della
+        # finestra passa invece dal normale event loop di pywebview e scatta in modo
+        # affidabile alla chiusura, quindi facciamo la cleanup anche lì.
+        window.events.closed += cleanup
         webview.start()
     finally:
-        if test_publisher_proc:
-            test_publisher_proc.terminate()
-        mediamtx_proc.terminate()
+        cleanup()
 
     sys.exit(0)
 
