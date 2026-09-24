@@ -210,6 +210,30 @@
   #model-status.hidden {
     display: none;
   }
+  .done-indicator {
+    font-size: 0.75rem;
+    color: #7ac47a;
+    padding: 4px;
+  }
+  .done-indicator.hidden {
+    display: none;
+  }
+  .subsection {
+    margin: 4px 0 12px;
+    padding: 8px 10px;
+    background: #1e1e1e;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+  }
+  .subsection.hidden {
+    display: none;
+  }
+  .subsection-title {
+    margin: 0 0 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #ccc;
+  }
   .spinner {
     width: 12px;
     height: 12px;
@@ -255,42 +279,49 @@
   <div id="menu-overlay"></div>
   <aside id="class-menu">
     <details open>
-      <summary>Classi da rilevare</summary>
-      <p class="hint">Modifica visibile a tutti gli spettatori connessi.</p>
-      <div class="actions">
-        <button id="select-all">Tutte</button>
-        <button id="select-none">Nessuna</button>
-      </div>
-      <div id="class-list">Caricamento...</div>
-    </details>
-
-    <details>
-      <summary>Visualizzazione</summary>
-      <label class="menu-toggle-row">
-        <span>Mostra FPS</span>
-        <input type="checkbox" id="fps-checkbox">
-      </label>
-    </details>
-
-    <details>
       <summary>Modello di rilevamento</summary>
       <p class="hint">Modifica visibile a tutti gli spettatori connessi.</p>
       <div class="device-options">
-        <label><input type="radio" name="model" id="model-general" value="general"> Generale (80 classi)</label>
         <label><input type="radio" name="model" id="model-aerial" value="aerial-person"> Aereo — solo persone</label>
+        <label><input type="radio" name="model" id="model-general" value="general"> Generale (80 classi)</label>
       </div>
       <p class="hint">Il modello "Aereo" è ottimizzato per persone viste dall'alto (fine-tuned), ma riconosce solo la classe persona — usa "Generale" per rilevare anche animali.</p>
       <div id="model-status" class="hidden">
         <span class="spinner"></span>Ricaricamento modello...
       </div>
+      <div id="model-done" class="done-indicator hidden">✓ Modello aggiornato</div>
+
+      <div id="classes-subsection" class="subsection hidden">
+        <p class="subsection-title">Classi da rilevare</p>
+        <div class="actions">
+          <button id="select-all">Tutte</button>
+          <button id="select-none">Nessuna</button>
+        </div>
+        <div id="class-list">Caricamento...</div>
+      </div>
+
       <div class="device-options">
         <label><input type="radio" name="device" id="device-cpu" value="cpu"> CPU</label>
-        <label><input type="radio" name="device" id="device-gpu" value="gpu"> GPU (Metal)</label>
+        <label><input type="radio" name="device" id="device-gpu" value="gpu"> GPU <span id="device-gpu-label"></span></label>
       </div>
       <p class="hint hidden" id="device-unavailable-hint">GPU non disponibile su questo dispositivo.</p>
       <div id="device-status" class="hidden">
-        <span class="spinner"></span>Ricaricamento modello...
+        <span class="spinner"></span>Cambio dispositivo...
       </div>
+      <div id="device-done" class="done-indicator hidden">✓ Dispositivo aggiornato</div>
+
+      <label class="field-row">
+        <span>
+          Rileva ogni N frame<br>
+          <span class="hint">1 = ogni frame. Valori più alti mantengono il video fluido quando la detection è lenta (i box restano visibili tra un aggiornamento e l'altro).</span>
+        </span>
+        <input type="number" id="detect-every" min="1" max="30" step="1">
+      </label>
+    </details>
+
+    <details>
+      <summary>SAHI</summary>
+      <p class="hint">Modifica visibile a tutti gli spettatori connessi.</p>
       <label class="menu-toggle-row">
         <span>
           SAHI (tile per oggetti piccoli)<br>
@@ -323,12 +354,13 @@
         </span>
         <input type="checkbox" id="sahi-standard-pred">
       </label>
-      <label class="field-row">
-        <span>
-          Rileva ogni N frame<br>
-          <span class="hint">1 = ogni frame. Valori più alti mantengono il video fluido quando la detection è lenta (i box restano visibili tra un aggiornamento e l'altro).</span>
-        </span>
-        <input type="number" id="detect-every" min="1" max="30" step="1">
+    </details>
+
+    <details>
+      <summary>Visualizzazione</summary>
+      <label class="menu-toggle-row">
+        <span>Mostra FPS</span>
+        <input type="checkbox" id="fps-checkbox">
       </label>
     </details>
 
@@ -493,24 +525,45 @@
 
     const deviceCpuRadio = document.getElementById("device-cpu");
     const deviceGpuRadio = document.getElementById("device-gpu");
+    const deviceGpuLabel = document.getElementById("device-gpu-label");
     const deviceUnavailableHint = document.getElementById("device-unavailable-hint");
     const deviceStatus = document.getElementById("device-status");
+    const deviceDone = document.getElementById("device-done");
     let devicePollTimer = null;
 
+    // Etichetta del backend GPU, in base a cosa rileva torch sulla piattaforma corrente
+    // (non assumiamo più Apple Silicon: su Windows/Linux con NVIDIA sarà CUDA).
+    const GPU_BACKEND_LABELS = { cuda: "(CUDA)", mps: "(Metal)" };
+
+    // Mostra brevemente "✓ ..." quando uno switch (modello/device) va a buon fine,
+    // invece di far sparire lo spinner senza altro riscontro.
+    function flashDone(el) {
+      el.classList.remove("hidden");
+      clearTimeout(el._doneTimer);
+      el._doneTimer = setTimeout(() => el.classList.add("hidden"), 2000);
+    }
+
+    let deviceWasReloading = false;
     function applyDeviceStatus(d) {
       deviceCpuRadio.checked = d.device === "cpu";
       deviceGpuRadio.checked = d.device === "gpu";
       deviceGpuRadio.disabled = d.reloading || !d.gpu_available;
       deviceCpuRadio.disabled = d.reloading;
+      deviceGpuLabel.textContent = GPU_BACKEND_LABELS[d.gpu_backend] || "";
       deviceUnavailableHint.classList.toggle("hidden", d.gpu_available);
       deviceStatus.classList.toggle("hidden", !d.reloading);
       if (d.reloading) {
+        deviceWasReloading = true;
         clearInterval(devicePollTimer);
         devicePollTimer = setInterval(() => {
           fetch("/device").then(r => r.json()).then(applyDeviceStatus);
         }, 800);
       } else {
         clearInterval(devicePollTimer);
+        if (deviceWasReloading) {
+          deviceWasReloading = false;
+          d.error ? showStatus("Errore: " + d.error) : flashDone(deviceDone);
+        }
       }
     }
 
@@ -534,7 +587,10 @@
     const modelGeneralRadio = document.getElementById("model-general");
     const modelAerialRadio = document.getElementById("model-aerial");
     const modelStatus = document.getElementById("model-status");
+    const modelDone = document.getElementById("model-done");
+    const classesSubsection = document.getElementById("classes-subsection");
     let modelPollTimer = null;
+    let modelWasReloading = false;
 
     function refreshClassList() {
       fetch("/classes")
@@ -548,7 +604,11 @@
       modelGeneralRadio.disabled = d.reloading;
       modelAerialRadio.disabled = d.reloading;
       modelStatus.classList.toggle("hidden", !d.reloading);
+      // "Classi da rilevare" ha senso solo col modello generale (l'aereo riconosce solo
+      // "person", non c'è nulla da scegliere).
+      classesSubsection.classList.toggle("hidden", d.variant !== "general");
       if (d.reloading) {
+        modelWasReloading = true;
         clearInterval(modelPollTimer);
         modelPollTimer = setInterval(() => {
           fetch("/model").then(r => r.json()).then(applyModelStatus);
@@ -556,6 +616,10 @@
       } else {
         clearInterval(modelPollTimer);
         refreshClassList();
+        if (modelWasReloading) {
+          modelWasReloading = false;
+          d.error ? showStatus("Errore: " + d.error) : flashDone(modelDone);
+        }
       }
     }
 

@@ -5,3 +5,4 @@ ultralytics
 pywebview
 numpy
 sahi
+certifi

@@ -3,19 +3,22 @@ Valutazione offline della detection: confronta le predizioni del modello contro 
 ground truth di una sequenza VisDrone, per misurare quante persone reali vengono
 trovate (recall) nelle configurazioni CPU, GPU e GPU+SAHI.
 
-Uso:
-    python evaluate.py [--sequence uav0000086_00000_v] [--iou 0.5] [--max-frames N]
+Uso (dalla root del progetto):
+    python tools/evaluate.py [--sequence uav0000086_00000_v] [--iou 0.5] [--max-frames N]
 """
 import argparse
+import sys
 import time
 from pathlib import Path
 
 import cv2
 
+# detection.py vive nella root del progetto, non in tools/.
+sys.path.insert(0, str(Path(__file__).parent.parent))
 import detection
 from detection import VideoProcessor
 
-VISDRONE_DIR = Path(__file__).parent / "test-data" / "VisDrone2019-VID-val"
+VISDRONE_DIR = Path(__file__).parent.parent / "test-data" / "VisDrone2019-VID-val"
 PERSON_CATEGORIES = {1, 2}  # VisDrone: 1=pedestrian, 2=people
 
 
@@ -117,13 +120,12 @@ def main():
     parser.add_argument("--sequence", default="uav0000086_00000_v")
     parser.add_argument("--iou", type=float, default=0.5)
     parser.add_argument("--max-frames", type=int, default=None, help="limita il numero di frame (debug rapido)")
-    parser.add_argument("--model", default=detection.MODEL_NAME, help="modello YOLO da valutare (es. yolo11s.pt)")
+    default_model = detection.MODEL_VARIANTS[detection.DEFAULT_MODEL_VARIANT]
+    parser.add_argument("--model", default=default_model, help="modello YOLO da valutare (es. yolo11s.pt)")
     parser.add_argument("--slice-size", type=int, default=detection.SAHI_SLICE_SIZE, help="dimensione tile SAHI (px)")
     parser.add_argument("--overlap", type=float, default=detection.SAHI_OVERLAP_RATIO, help="overlap tra tile SAHI (0-0.9)")
     parser.add_argument("--skip-cpu", action="store_true", help="salta la configurazione CPU baseline")
     args = parser.parse_args()
-
-    detection.MODEL_NAME = args.model
 
     seq_dir = VISDRONE_DIR / "sequences" / args.sequence
     ann_path = VISDRONE_DIR / "annotations" / f"{args.sequence}.txt"
@@ -140,7 +142,7 @@ def main():
     print(f"SAHI slice size: {args.slice_size}px, overlap: {args.overlap}")
     print(f"Sequenza: {args.sequence} ({len(frame_paths)} frame, {total_gt_boxes} bounding box persona nella GT)")
 
-    processor = VideoProcessor()
+    processor = VideoProcessor(model_path=args.model)
     processor.set_sahi_config(slice_size=args.slice_size, overlap_ratio=args.overlap)
     target_ids = [i for i, n in processor.class_names.items() if n == "person"]
 
@@ -153,17 +155,18 @@ def main():
         ))
 
     if processor.gpu_torch_device:
+        gpu_label = {"cuda": "CUDA", "mps": "Metal"}.get(processor.gpu_torch_device, processor.gpu_torch_device)
         processor.set_processing_device("gpu")
         while processor.get_device_status()["reloading"]:
             time.sleep(0.2)
 
         results.append(evaluate_config(
             processor, False, target_ids, frame_paths, gt_by_frame, args.iou,
-            "2) GPU (Metal), no SAHI",
+            f"2) GPU ({gpu_label}), no SAHI",
         ))
         results.append(evaluate_config(
             processor, True, target_ids, frame_paths, gt_by_frame, args.iou,
-            f"3) GPU (Metal) + SAHI (tile {args.slice_size}px, overlap {args.overlap})",
+            f"3) GPU ({gpu_label}) + SAHI (tile {args.slice_size}px, overlap {args.overlap})",
         ))
     else:
         print("\nGPU non disponibile su questa macchina: salto i test 2 e 3.")

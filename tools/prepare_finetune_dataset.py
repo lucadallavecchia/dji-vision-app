@@ -8,8 +8,8 @@ ridotti a classe singola "person" (0), in un'unica struttura YOLO pronta per
 Prerequisiti: VisDrone2019-DET-{train,val}.zip e c2a-dataset.zip estratti sotto
 test-data/ (lo script li scompatta automaticamente se trova gli zip).
 
-Uso:
-    python prepare_finetune_dataset.py
+Uso (dalla root del progetto):
+    python tools/prepare_finetune_dataset.py
 """
 import shutil
 import zipfile
@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PIL import Image
 
-TEST_DATA_DIR = Path(__file__).parent / "test-data"
+TEST_DATA_DIR = Path(__file__).parent.parent / "test-data"
 OUTPUT_DIR = TEST_DATA_DIR / "finetune-dataset"
 
 VISDRONE_PERSON_CATEGORIES = {1, 2}  # VisDrone: 1=pedestrian, 2=people

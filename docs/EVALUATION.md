@@ -7,7 +7,7 @@ solo dati sperimentali e conclusioni.
 
 ## Metodologia
 
-- **Script**: [`evaluate.py`](evaluate.py) — valutazione offline, indipendente dall'app live.
+- **Script**: [`tools/evaluate.py`](../tools/evaluate.py) — valutazione offline, indipendente dall'app live.
   Gira direttamente sui frame JPEG di una sequenza [VisDrone](https://github.com/VisDrone/VisDrone-Dataset)
   (task "Object Detection in Videos"), confrontando le detection del modello contro le
   ground truth reali fornite dal dataset.
@@ -21,7 +21,7 @@ solo dati sperimentali e conclusioni.
   - **Precision** = detection corrette / detection totali segnalate.
   - **ms/frame** = tempo medio della sola chiamata di detection (non include lettura RTSP,
     disegno box, encoding JPEG — vedi nota sul gap offline/live più sotto).
-- **Riproducibilità**: `python evaluate.py --model <nome.pt> --slice-size N --overlap X
+- **Riproducibilità**: `python tools/evaluate.py --model <nome.pt> --slice-size N --overlap X
   [--skip-cpu] [--max-frames N]`.
 
 ## Risultato 1 — CPU vs GPU (Metal)
